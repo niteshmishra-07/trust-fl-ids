@@ -1,0 +1,27 @@
+# Data
+data/raw/*.csv
+data/nodes/*.csv
+data/nodes/iid/*.csv
+data/nodes/noniid/*.csv
+!data/raw/.gitkeep
+!data/nodes/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Results / models
+results/*.png
+results/*.json
+results/*.joblib
+!results/.gitkeep
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
