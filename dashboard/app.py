@@ -178,5 +178,69 @@ try:
         st.subheader(f"Prediction: {label_str}  (confidence: {max(proba):.1%})")
         st.caption(f"Ground truth: {true_str}" + ("  — correct ✔️" if pred == y_row[0] else "  — wrong ✗"))
 
+    # -----------------------------------------------------------------------
+    # 6. Live simulated IoT traffic feed
+    # -----------------------------------------------------------------------
+    st.header("6. Live simulated IoT traffic feed")
+    st.caption(
+        "Simulates an IoT device continuously sending traffic to the trained model, one flow "
+        "at a time, in real time. Each row below is drawn from held-out, unseen traffic -- "
+        "the same as a real device's traffic would look once the trained model is deployed."
+    )
+
+    import time
+    import datetime
+
+    if "live_feed_log" not in st.session_state:
+        st.session_state.live_feed_log = []
+    if "live_feed_running" not in st.session_state:
+        st.session_state.live_feed_running = False
+    if "force_attack_ticks" not in st.session_state:
+        st.session_state.force_attack_ticks = 0
+
+    normal_rows = test_df[test_df["label"] == 0]
+    attack_rows = test_df[test_df["label"] == 1]
+
+    ctrl_cols = st.columns([1, 1, 2])
+    with ctrl_cols[0]:
+        if st.button("▶ Start live feed" if not st.session_state.live_feed_running else "⏸ Pause live feed"):
+            st.session_state.live_feed_running = not st.session_state.live_feed_running
+    with ctrl_cols[1]:
+        if st.button("🚨 Simulate attack burst"):
+            st.session_state.force_attack_ticks = 5  # next 5 flows are drawn from real attack traffic
+    with ctrl_cols[2]:
+        status = "🟢 LIVE" if st.session_state.live_feed_running else "⏸️ paused"
+        st.write(f"Status: **{status}**  |  Total flows classified: **{len(st.session_state.live_feed_log)}**")
+
+    @st.fragment(run_every=2 if st.session_state.live_feed_running else None)
+    def live_feed_fragment():
+        if st.session_state.live_feed_running:
+            if st.session_state.force_attack_ticks > 0 and len(attack_rows) > 0:
+                row = attack_rows.sample(1)
+                st.session_state.force_attack_ticks -= 1
+            else:
+                row = normal_rows.sample(1) if len(normal_rows) > 0 else test_df.sample(1)
+
+            X_row, y_row = to_xy(row, scaler)
+            pred = clf.predict(X_row)[0]
+            proba = clf.predict_proba(X_row)[0]
+
+            st.session_state.live_feed_log.insert(0, {
+                "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                "prediction": "🚨 ATTACK" if pred == 1 else "✅ NORMAL",
+                "confidence": f"{max(proba):.1%}",
+                "attack_type": row["attack_type"].iloc[0],
+                "ground_truth": "ATTACK" if y_row[0] == 1 else "NORMAL",
+            })
+            st.session_state.live_feed_log = st.session_state.live_feed_log[:20]  # keep last 20
+
+        if st.session_state.live_feed_log:
+            feed_df = pd.DataFrame(st.session_state.live_feed_log)
+            st.dataframe(feed_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Click **Start live feed** to begin streaming simulated traffic through the model.")
+
+    live_feed_fragment()
+
 except FileNotFoundError:
     st.info("Run `python data/generate_synthetic_data.py` and `python data/partition_data.py` first.")
