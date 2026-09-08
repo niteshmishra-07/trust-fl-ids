@@ -26,7 +26,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import ray
 import flwr as fl
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, log_loss
 
@@ -187,8 +186,8 @@ def main():
     p.add_argument("--rounds", type=int, default=8)
     p.add_argument("--local-epochs", type=int, default=2)
     p.add_argument("--poison-node", type=int, default=None, help="index of node to poison (0-based)")
-    p.add_argument("--poison-fraction", type=float, default=0.8)
-    p.add_argument("--boost-factor", type=float, default=1.0, help="update-scaling factor for the poisoned node")
+    p.add_argument("--poison-fraction", type=float, default=1.0)
+    p.add_argument("--boost-factor", type=float, default=4.0, help="update-scaling factor for the poisoned node")
     p.add_argument("--suite", action="store_true", help="run the full Phase 5 comparison suite")
     args = p.parse_args()
 
