@@ -5,3 +5,4 @@ flwr[simulation]
 matplotlib
 streamlit
 joblib
+plotly
