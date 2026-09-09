@@ -78,7 +78,8 @@ def make_evaluate_fn(X_test, y_test, template_model):
 
 
 def run_once(strategy_name, partition_type, n_nodes, n_rounds, local_epochs,
-             poison_node_idx, poison_fraction, boost_factor=1.0, seed=RANDOM_STATE, verbose=True):
+             poison_node_idx, poison_fraction, boost_factor=1.0, seed=RANDOM_STATE, verbose=True,
+             return_strategy=False):
     train_df, test_df = get_global_test_split(random_state=seed)
     scaler = fit_scaler(train_df)
     X_test, y_test = to_xy(test_df, scaler)
@@ -141,7 +142,24 @@ def run_once(strategy_name, partition_type, n_nodes, n_rounds, local_epochs,
         tag = f"[{strategy_name} | {partition_type} | poison={poison_node_idx}]"
         print(f"{tag} final accuracy={final.get('accuracy'):.4f}  f1={final.get('f1'):.4f}")
 
+    if return_strategy:
+        return result, strategy, scaler
     return result
+
+
+def save_dashboard_artifacts(strategy, scaler):
+    """Persists what the dashboard's 'upload & analyze a device' tool needs:
+    the trained global model weights, the fitted scaler, and the 'healthy'
+    consensus direction -- so any newly-uploaded traffic file can later be
+    scored for trust without re-running the whole federated simulation.
+    """
+    import joblib
+    weights = strategy.current_weights
+    np.savez(RESULTS_DIR / "global_model_weights.npz", *weights)
+    joblib.dump(scaler, RESULTS_DIR / "scaler.joblib")
+    if strategy.last_consensus is not None:
+        np.save(RESULTS_DIR / "reference_consensus.npy", strategy.last_consensus)
+    print(f"Saved dashboard artifacts to {RESULTS_DIR} (global_model_weights.npz, scaler.joblib, reference_consensus.npy)")
 
 
 def run_suite(n_nodes=4, n_rounds=10, local_epochs=2, poison_fraction=1.0, boost_factor=4.0, seed=RANDOM_STATE):
@@ -155,15 +173,31 @@ def run_suite(n_nodes=4, n_rounds=10, local_epochs=2, poison_fraction=1.0, boost
     all_results = {}
     for cfg in configs:
         tag = cfg.pop("tag")
-        res = run_once(
-            partition_type="iid",
-            n_nodes=n_nodes,
-            n_rounds=n_rounds,
-            local_epochs=local_epochs,
-            poison_fraction=poison_fraction,
-            seed=seed,
-            **cfg,
-        )
+        if tag == "clean_trust":
+            # This run's final global model + consensus direction becomes the
+            # reference used by the dashboard's "upload & analyze a device" tool
+            # to score arbitrary new/uploaded traffic later.
+            res, strategy, scaler = run_once(
+                partition_type="iid",
+                n_nodes=n_nodes,
+                n_rounds=n_rounds,
+                local_epochs=local_epochs,
+                poison_fraction=poison_fraction,
+                seed=seed,
+                return_strategy=True,
+                **cfg,
+            )
+            save_dashboard_artifacts(strategy, scaler)
+        else:
+            res = run_once(
+                partition_type="iid",
+                n_nodes=n_nodes,
+                n_rounds=n_rounds,
+                local_epochs=local_epochs,
+                poison_fraction=poison_fraction,
+                seed=seed,
+                **cfg,
+            )
         all_results[tag] = res
 
     out_path = RESULTS_DIR / "comparison.json"

@@ -57,6 +57,7 @@ class TrustWeightedFedAvg(fl.server.strategy.FedAvg):
             if kwargs.get("initial_parameters") is not None
             else None
         )
+        self.last_consensus: Optional[np.ndarray] = None  # unit-normalized "healthy" update direction
 
     def aggregate_fit(
         self,
@@ -94,6 +95,7 @@ class TrustWeightedFedAvg(fl.server.strategy.FedAvg):
             norm = np.linalg.norm(d)
             unit_deltas.append(d / norm if norm > 0 else d)
         consensus = np.mean(np.stack(unit_deltas), axis=0)
+        self.last_consensus = consensus  # remembered so it can be reused to score new/unseen data later
 
         round_scores = {}
         for nid, delta in zip(node_ids, deltas):

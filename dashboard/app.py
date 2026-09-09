@@ -46,6 +46,115 @@ baseline = load_json(RESULTS_DIR / "baseline_results.json")
 comparison = load_json(RESULTS_DIR / "comparison.json")
 
 # ---------------------------------------------------------------------------
+# 0. Upload & Analyze a Device's Traffic -- THE main interactive feature
+# ---------------------------------------------------------------------------
+st.header("🔍 Upload & Analyze a Device's Traffic")
+st.write(
+    "Upload a CSV of a device's network traffic. The system classifies each traffic flow as "
+    "**attack or normal**, and computes an overall **Trust Score** for the device -- the same "
+    "mechanism (Phase 4) used to detect and down-weight malicious nodes during federated training. "
+    "A low trust score means: if this device were part of the federated system, its contribution "
+    "would be heavily discounted because its behavior doesn't match what a healthy device's does."
+)
+
+sample_cols = st.columns(2)
+with sample_cols[0]:
+    try:
+        with open(ROOT / "data" / "sample_device_clean.csv", "rb") as f:
+            st.download_button("⬇️ Download a sample CLEAN device", f, file_name="sample_device_clean.csv")
+    except FileNotFoundError:
+        pass
+with sample_cols[1]:
+    try:
+        with open(ROOT / "data" / "sample_device_poisoned.csv", "rb") as f:
+            st.download_button("⬇️ Download a sample POISONED device", f, file_name="sample_device_poisoned.csv")
+    except FileNotFoundError:
+        pass
+
+st.caption(
+    "For a live demo: download one of the samples above, then upload it below. Try both, one "
+    "after another, to see the trust score contrast."
+)
+
+uploaded_file = st.file_uploader("Upload device traffic CSV", type="csv")
+
+if uploaded_file is not None:
+    try:
+        import joblib
+        from common import FEATURE_COLUMNS, LABEL_COLUMN, to_xy
+        import model_utils as mu
+
+        upload_df = pd.read_csv(uploaded_file)
+        missing_cols = [c for c in FEATURE_COLUMNS + [LABEL_COLUMN] if c not in upload_df.columns]
+        if missing_cols:
+            st.error(f"Uploaded file is missing required columns: {missing_cols}")
+        else:
+            scaler = joblib.load(RESULTS_DIR / "scaler.joblib")
+            npz = np.load(RESULTS_DIR / "global_model_weights.npz")
+            global_weights = [npz[k] for k in npz.files]
+            reference_consensus = np.load(RESULTS_DIR / "reference_consensus.npy")
+
+            X, y = to_xy(upload_df, scaler)
+
+            # Classify every row using the CURRENT trained global model
+            clf_model = mu.build_model()
+            init_X, init_y = X[:4], np.array([0, 1, 0, 1])[: min(4, len(X))]
+            mu.init_architecture(clf_model, init_X, init_y)
+            mu.set_weights(clf_model, global_weights)
+            preds = clf_model.predict(X)
+            probs = clf_model.predict_proba(X)
+
+            # Trust score: locally train from the global model on this device's
+            # data, then compare the resulting update direction to the
+            # reference "healthy" direction learned during clean training.
+            local_model = mu.build_model()
+            mu.init_architecture(local_model, init_X, init_y)
+            mu.set_weights(local_model, global_weights)
+            mu.local_train(local_model, X, y, epochs=2)
+            new_weights = mu.get_weights(local_model)
+            delta = mu.flatten_weights(new_weights) - mu.flatten_weights(global_weights)
+            norm = np.linalg.norm(delta)
+            unit_delta = delta / norm if norm > 0 else delta
+            cos_sim = float(
+                np.dot(unit_delta, reference_consensus)
+                / (np.linalg.norm(unit_delta) * np.linalg.norm(reference_consensus))
+            )
+            trust_score = max(cos_sim, 0.0)
+
+            attack_rate = preds.mean()
+
+            res_cols = st.columns(3)
+            res_cols[0].metric("Flows analyzed", f"{len(upload_df):,}")
+            res_cols[1].metric("Flagged as ATTACK", f"{attack_rate:.1%}")
+
+            if trust_score > 0.6:
+                verdict, color = "✅ TRUSTED", "green"
+            elif trust_score > 0.2:
+                verdict, color = "⚠️ SUSPICIOUS", "orange"
+            else:
+                verdict, color = "🚨 UNTRUSTED", "red"
+            res_cols[2].metric("Trust Score", f"{trust_score:.2f}")
+            st.markdown(f":{color}[**{verdict}**] -- this device's behavior pattern " +
+                        ("closely matches" if trust_score > 0.6 else
+                         "partially resembles" if trust_score > 0.2 else
+                         "sharply diverges from") +
+                        " what honest, trustworthy devices look like in this system.")
+
+            preview = upload_df[FEATURE_COLUMNS].copy()
+            preview["prediction"] = np.where(preds == 1, "ATTACK", "NORMAL")
+            preview["confidence"] = probs.max(axis=1).round(3)
+            st.write("Per-flow results (first 50 rows):")
+            st.dataframe(preview.head(50), use_container_width=True)
+
+    except FileNotFoundError:
+        st.warning(
+            "Model artifacts not found. Run `python src/run_experiment.py --suite` first -- "
+            "it trains the global model and saves what this tool needs."
+        )
+
+st.divider()
+
+# ---------------------------------------------------------------------------
 # 1. Headline metrics
 # ---------------------------------------------------------------------------
 st.header("1. Headline results")
