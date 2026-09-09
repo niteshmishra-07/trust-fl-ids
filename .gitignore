@@ -15,9 +15,9 @@ venv/
 
 # Results / models
 results/*.png
-results/*.json
 results/*.joblib
 !results/.gitkeep
+!results/scaler.joblib
 
 # OS
 .DS_Store
